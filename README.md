@@ -1,2 +1,2 @@
 # Handwritten Mathematical Expression Recognition
-人工智能与系统科学课程项目：基于CNN/Transformer与大模型增强的手写数学表达式识别
+人工智能与系统科学课程小组项目：基于CNN/Transformer与大模型增强的手写数学表达式识别
