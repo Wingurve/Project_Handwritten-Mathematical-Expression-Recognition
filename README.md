@@ -1,2 +1,2 @@
-# AI_Program
-人工智能与系统科学课程项目
+# Handwritten Mathematical Expression Recognition
+人工智能与系统科学课程项目：基于CNN/Transformer与大模型增强的手写数学表达式识别
