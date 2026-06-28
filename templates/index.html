@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FormulaReader</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+</head>
+<body>
+    <main class="shell">
+        <section class="topbar">
+            <div>
+                <div class="brand">FormulaReader</div>
+                <p class="subtitle">手写公式识别，BTTR 初识别，DeepSeek 再修正</p>
+            </div>
+            <div class="status-pill" id="statusPill">CPU · LLM</div>
+        </section>
+
+        <section class="workspace">
+            <div class="upload-panel">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-mark">∑</div>
+                    <h1>上传手写公式图片</h1>
+                    <p>支持拖拽、点击选择或 Ctrl+V 粘贴图片</p>
+                    <div class="format-row">
+                        <span>PNG</span><span>JPG</span><span>BMP</span><span>WebP</span><span>TIFF</span>
+                    </div>
+                </div>
+                <input type="file" id="fileInput" accept="image/png,image/jpeg,image/bmp,image/gif,image/webp,image/tiff">
+
+                <div class="preview-card" id="previewCard">
+                    <div class="preview-head">
+                        <span>输入图片</span>
+                        <button class="icon-btn" id="removeBtn" title="清除">×</button>
+                    </div>
+                    <div class="preview-frame">
+                        <img id="previewImg" src="" alt="Uploaded formula">
+                    </div>
+                    <div class="meta-grid" id="metaGrid">
+                        <span>预处理</span><strong>等待结果</strong>
+                    </div>
+                </div>
+            </div>
+
+            <div class="result-panel" id="resultPanel">
+                <div class="empty-state" id="emptyState">
+                    <span class="empty-symbol">fx</span>
+                    <p>识别结果会显示在这里</p>
+                </div>
+
+                <div class="loading-state" id="loadingState">
+                    <span class="spinner"></span>
+                    <div>
+                        <strong>正在识别并调用 LLM 修正</strong>
+                        <p>CPU 推理和 API 后处理可能需要几秒</p>
+                    </div>
+                </div>
+
+                <div class="results" id="results">
+                    <div class="result-card primary-result">
+                        <div class="card-head">
+                            <div>
+                                <span class="eyebrow">LLM 修正结果</span>
+                                <h2>最终 LaTeX</h2>
+                            </div>
+                            <button class="copy-btn" data-copy="final">复制</button>
+                        </div>
+                        <div class="render-box" id="finalRender"></div>
+                        <pre class="latex-code" id="finalLatex"></pre>
+                        <p class="note" id="llmNote"></p>
+                    </div>
+
+                    <div class="result-card">
+                        <div class="card-head">
+                            <div>
+                                <span class="eyebrow">BTTR 原始输出</span>
+                                <h2>模型初识别</h2>
+                            </div>
+                            <button class="copy-btn secondary" data-copy="raw">复制</button>
+                        </div>
+                        <div class="render-box muted" id="rawRender"></div>
+                        <pre class="latex-code" id="rawLatex"></pre>
+                    </div>
+
+                    <div class="toolbar">
+                        <button class="ghost-btn" id="retryBtn">重新识别</button>
+                        <span class="confidence" id="confidenceBadge">置信度 --</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const previewCard = document.getElementById('previewCard');
+    const previewImg = document.getElementById('previewImg');
+    const resultPanel = document.getElementById('resultPanel');
+    const emptyState = document.getElementById('emptyState');
+    const loadingState = document.getElementById('loadingState');
+    const results = document.getElementById('results');
+    const finalRender = document.getElementById('finalRender');
+    const rawRender = document.getElementById('rawRender');
+    const finalLatex = document.getElementById('finalLatex');
+    const rawLatex = document.getElementById('rawLatex');
+    const llmNote = document.getElementById('llmNote');
+    const confidenceBadge = document.getElementById('confidenceBadge');
+    const metaGrid = document.getElementById('metaGrid');
+    const retryBtn = document.getElementById('retryBtn');
+    const removeBtn = document.getElementById('removeBtn');
+    const statusPill = document.getElementById('statusPill');
+    const toast = document.getElementById('toast');
+
+    let currentImageData = null;
+    let currentFile = null;
+    let finalText = '';
+    let rawText = '';
+
+    uploadArea.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', e => {
+        if (e.target.files[0]) processFile(e.target.files[0]);
+    });
+
+    uploadArea.addEventListener('dragover', e => {
+        e.preventDefault();
+        uploadArea.classList.add('drag-over');
+    });
+    uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('drag-over'));
+    uploadArea.addEventListener('drop', e => {
+        e.preventDefault();
+        uploadArea.classList.remove('drag-over');
+        if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]);
+    });
+    document.addEventListener('paste', e => {
+        for (const item of e.clipboardData.items) {
+            if (item.type.startsWith('image/')) {
+                processFile(item.getAsFile());
+                break;
+            }
+        }
+    });
+
+    removeBtn.addEventListener('click', resetAll);
+    retryBtn.addEventListener('click', () => {
+        if (currentFile) recognizeFile(currentFile);
+        else if (currentImageData) recognizeBase64(currentImageData);
+    });
+
+    document.querySelectorAll('[data-copy]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const value = btn.dataset.copy === 'final' ? finalText : rawText;
+            copyText(value);
+        });
+    });
+
+    async function processFile(file) {
+        const allowed = ['image/png', 'image/jpeg', 'image/bmp', 'image/gif', 'image/webp', 'image/tiff'];
+        if (!allowed.includes(file.type)) {
+            showToast('不支持的图片格式');
+            return;
+        }
+        currentFile = file;
+        const reader = new FileReader();
+        reader.onload = e => {
+            currentImageData = e.target.result;
+            previewImg.src = currentImageData;
+            previewCard.classList.add('show');
+            recognizeFile(file);
+        };
+        reader.readAsDataURL(file);
+    }
+
+    async function recognizeFile(file) {
+        showLoading();
+        const formData = new FormData();
+        formData.append('image', file);
+        await callRecognize(() => fetch('/api/recognize', { method: 'POST', body: formData }));
+    }
+
+    async function recognizeBase64(imageData) {
+        showLoading();
+        await callRecognize(() => fetch('/api/recognize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: imageData }),
+        }));
+    }
+
+    async function callRecognize(requestFactory) {
+        try {
+            const response = await requestFactory();
+            const data = await response.json();
+            if (!data.success) {
+                showError(data.error || '识别失败');
+                return;
+            }
+            displayResult(data);
+        } catch (err) {
+            showError('请求失败: ' + err.message);
+        }
+    }
+
+    function showLoading() {
+        emptyState.style.display = 'none';
+        loadingState.style.display = 'flex';
+        results.style.display = 'none';
+        metaGrid.innerHTML = '<span>预处理</span><strong>处理中</strong>';
+    }
+
+    function displayResult(data) {
+        rawText = data.latex || '';
+        finalText = data.corrected_latex || rawText;
+
+        rawLatex.textContent = rawText || '(无结果)';
+        finalLatex.textContent = finalText || '(无结果)';
+        confidenceBadge.textContent = `BTTR 置信度 ${data.confidence}`;
+
+        renderLatex(rawRender, rawText);
+        renderLatex(finalRender, finalText);
+
+        if (data.corrected_latex) {
+            llmNote.textContent = '已启用 DeepSeek，对 BTTR 输出进行 LaTeX 后处理。';
+            statusPill.textContent = 'CPU · LLM 已启用';
+            statusPill.classList.remove('warn');
+        } else if (data.corrected_error) {
+            llmNote.textContent = 'LLM 修正失败：' + data.corrected_error;
+            statusPill.textContent = 'CPU · LLM 调用失败';
+            statusPill.classList.add('warn');
+        } else if (!data.llm_enabled) {
+            llmNote.textContent = 'LLM 未启用，最终结果使用 BTTR 输出。';
+            statusPill.textContent = 'CPU · LLM 未启用';
+            statusPill.classList.add('warn');
+        } else {
+            llmNote.textContent = 'LLM 未返回修正内容，最终结果使用 BTTR 输出。';
+            statusPill.textContent = 'CPU · LLM 无修正';
+            statusPill.classList.add('warn');
+        }
+
+        const prep = data.preprocess || {};
+        const original = prep.original_size ? prep.original_size.join('×') : '--';
+        const processed = prep.processed_size ? prep.processed_size.join('×') : '--';
+        metaGrid.innerHTML = `
+            <span>原图</span><strong>${original}</strong>
+            <span>送入模型</span><strong>${processed}</strong>
+            <span>反相</span><strong>${prep.inverted ? '是' : '否'}</strong>
+        `;
+
+        loadingState.style.display = 'none';
+        results.style.display = 'grid';
+    }
+
+    function renderLatex(target, latex) {
+        target.innerHTML = '';
+        if (!latex) {
+            target.textContent = '没有可渲染内容';
+            return;
+        }
+        try {
+            katex.render(latex, target, { throwOnError: false, displayMode: true });
+        } catch (e) {
+            target.textContent = latex;
+        }
+    }
+
+    function showError(message) {
+        loadingState.style.display = 'none';
+        results.style.display = 'none';
+        emptyState.style.display = 'flex';
+        emptyState.innerHTML = `<span class="empty-symbol">!</span><p>${message}</p>`;
+        showToast(message);
+    }
+
+    function resetAll() {
+        currentImageData = null;
+        currentFile = null;
+        finalText = '';
+        rawText = '';
+        fileInput.value = '';
+        previewCard.classList.remove('show');
+        loadingState.style.display = 'none';
+        results.style.display = 'none';
+        emptyState.style.display = 'flex';
+        emptyState.innerHTML = '<span class="empty-symbol">fx</span><p>识别结果会显示在这里</p>';
+        metaGrid.innerHTML = '<span>预处理</span><strong>等待结果</strong>';
+    }
+
+    function copyText(text) {
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => showToast('LaTeX 已复制')).catch(() => {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            showToast('LaTeX 已复制');
+        });
+    }
+
+    let toastTimer;
+    function showToast(message) {
+        clearTimeout(toastTimer);
+        toast.textContent = message;
+        toast.classList.add('show');
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+    </script>
+</body>
+</html>

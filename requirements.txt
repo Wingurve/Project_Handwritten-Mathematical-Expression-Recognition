@@ -1,0 +1,24 @@
+# Requirements for FormulaReader handwritten formula recognition
+# Based on BTTR architecture
+
+# Deep Learning
+torch>=2.0.0
+pytorch-lightning>=2.0.0
+torchvision>=0.15.0
+einops>=0.4.0
+
+# Configuration
+pyyaml>=5.4.0
+python-dotenv>=0.19.0
+
+# Logging
+tensorboard>=2.6.0
+
+# LLM API (for DeepSeek LaTeX post-processing)
+openai>=1.0.0
+
+# Image Processing (for formula recognition)
+Pillow>=9.0.0
+
+# Web Server (for the frontend)
+Flask>=3.0.0

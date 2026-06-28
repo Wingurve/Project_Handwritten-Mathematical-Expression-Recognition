@@ -1,0 +1,17 @@
+# FormulaReader configuration
+
+bttr:
+  checkpoint_path: "pretrained-2014.ckpt"
+  device: "cpu"
+  beam_size: 10
+  max_len: 200
+  alpha: 1.0
+
+deepseek:
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
+  enabled: true
+
+server:
+  host: "0.0.0.0"
+  port: 5000
